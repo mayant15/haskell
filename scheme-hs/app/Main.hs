@@ -71,13 +71,59 @@ parseExpr =
       char ')'
       return x
 
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
+
+showVal :: LispVal -> String
+showVal (String s) = "\"" ++ s ++ "\""
+showVal (Atom a) = a
+showVal (Number n) = show n
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+showVal (List list) = "(" ++ unwordsList list ++ ")"
+showVal (DottedList head tail) = "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
+
+instance Show LispVal where show = showVal
+
 -- Entry point to parse an expression
-readExpr :: String -> String
+readExpr :: String -> LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left err -> "No match: " ++ show err
-  Right val -> "Found value"
+  Left err -> String ("No match: " ++ show err)
+  Right val -> val
+
+eval :: LispVal -> LispVal
+eval val@(String _) = val
+eval val@(Number _) = val
+eval val@(Bool _) = val
+eval (List [Atom "quote", val]) = val
+eval (List (Atom func : args)) = apply func (map eval args)
+
+apply :: String -> [LispVal] -> LispVal
+apply func args = maybe (Bool False) ($ args) (lookup func primitives)
+
+primitives :: [(String, [LispVal] -> LispVal)]
+primitives =
+  [ ("+", numericBinop (+)),
+    ("-", numericBinop (-)),
+    ("*", numericBinop (*)),
+    ("/", numericBinop div),
+    ("mod", numericBinop mod),
+    ("quotient", numericBinop quot),
+    ("remainder", numericBinop rem)
+  ]
+
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop op params = Number $ foldl1 op $ map unpackNumFromLispVal params
+
+unpackNumFromLispVal :: LispVal -> Integer
+unpackNumFromLispVal (Number n) = n
+unpackNumFromLispVal (String s) =
+  let parsed = reads s :: [(Integer, String)]
+   in if null parsed
+        then 0
+        else fst $ head parsed
+unpackNumFromLispVal (List [n]) = unpackNumFromLispVal n
+unpackNumFromLispVal _ = 0
 
 main :: IO ()
-main = do
-  (expr : _) <- getArgs
-  putStrLn (readExpr expr)
+main = getArgs >>= print . eval . readExpr . head
